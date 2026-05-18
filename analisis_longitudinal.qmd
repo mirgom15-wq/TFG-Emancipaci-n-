@@ -1,0 +1,209 @@
+---
+title: "Analisis Longitudinal"
+format: html
+editor: visual
+---
+
+## Carga de datos
+
+He descargado los datos longitudinales de la ECV en base 2004 (de 2004 hasta 2010) y en base 2013 (2008 hasta 2024).
+
+He tenido que leer los archivos de tres formas distintas:
+
+```{r}
+ruta_base2004 <- "C:/Users/mirig/OneDrive/Escritorio/Universidad/4º Año/2º Cuatrimestre/TFG/Datos ECV/Ficheros Longitudinales/base 2004"
+
+ruta_base2013 <- "C:/Users/mirig/OneDrive/Escritorio/Universidad/4º Año/2º Cuatrimestre/TFG/Datos ECV/Ficheros Longitudinales/base 2013"
+```
+
+```{r}
+library(tidyverse)
+
+cargar_fichero_r <- function(ruta, separador = ",") {
+  df <- read.csv(ruta, sep = separador) |> 
+    select(any_of(c("RB010", "RB030", "RB080", 
+                    "RB090", "RB220", "RB230", "RB240",
+                    "RB062", "RB063", "RB064")))
+  return(df)
+}
+```
+
+### Base 2004: 2004-2010
+
+```{r}
+prefijos_2004 <- c("es07", "es08", "es09", "es10")
+
+lista_2004 <- map(prefijos_2004, function(p) {
+  ruta <- paste0(ruta_base2004, "/", p, "r.csv")
+  cargar_fichero_r(ruta)
+})
+
+fichero_r_base2004 <- bind_rows(lista_2004)
+cat("Base 2004 cargada:", nrow(fichero_r_base2004), "filas\n")
+```
+
+### Base 2013: 2008-2019
+
+```{r}
+prefijos_2013_csv <- c("es12", "es13", "es14", "es15", 
+                        "es16", "es17", "es18", "es19")
+
+lista_2013_csv <- map(prefijos_2013_csv, function(p) {
+  ruta <- paste0(ruta_base2013, "/", p, "r.csv")
+  cargar_fichero_r(ruta)
+})
+
+fichero_r_base2013_csv <- bind_rows(lista_2013_csv)
+cat("Base 2013 CSV cargada:", nrow(fichero_r_base2013_csv), "filas\n")
+```
+
+### Base 2013: 2017-2021
+
+```{r}
+nombres_nuevo_csv <- c("ECV_Lr_17a20.csv", "ECV_Lr_18a21.csv")
+
+lista_nuevo_csv <- map(nombres_nuevo_csv, function(n) {
+  ruta <- paste0(ruta_base2013, "/", n)
+  read.csv(ruta, sep = "\t") |> 
+    select(any_of(c("RB010", "RB030", "RB080",
+                    "RB090", "RB220", "RB230", "RB240",
+                    "RB062", "RB063", "RB064")))
+})
+
+fichero_r_nuevo_csv <- bind_rows(lista_nuevo_csv)
+cat("Base 2013 CSV nuevo cargada:", nrow(fichero_r_nuevo_csv), "filas\n")
+```
+
+### Base 2013: 2019-2024
+
+```{r}
+nombres_rdata <- c("ECV_Lr_19a22.RData", "ECV_Lr_20a23.RData", 
+                   "ECV_Lr_21a24.RData")
+
+lista_rdata <- map(nombres_rdata, function(n) {
+  ruta <- paste0(ruta_base2013, "/", n)
+  load(ruta, envir = .GlobalEnv)
+  df <- Microdatos |> 
+    select(any_of(c("RB010", "RB030", "RB080",
+                    "RB090", "RB220", "RB230", "RB240",
+                    "RB062", "RB063", "RB064")))
+  return(df)
+})
+
+fichero_r_rdata <- bind_rows(lista_rdata)
+cat("Base 2013 RData cargada:", nrow(fichero_r_rdata), "filas\n")
+```
+
+### Unión Ficheros Longitudinales
+
+Como algunas variables venían en algún archivo como caracter y en otras como numérica he convertido todas en caracter primero para que se unieran bien y luego ya cuando necesite hacer cálculos las cambio a numérica. Tammbién he eliminado duplicados porque como se solapan los años para que no haya más de una persona en el mismo año:
+
+```{r}
+# 1. Estandarizar tipos
+fichero_r_base2004 <- fichero_r_base2004 |> mutate(across(everything(), as.character))
+fichero_r_base2013_csv <- fichero_r_base2013_csv  |>  mutate(across(everything(), as.character))
+fichero_r_nuevo_csv <- fichero_r_nuevo_csv  |>  mutate(across(everything(), as.character))
+fichero_r_rdata <- fichero_r_rdata  |>  mutate(across(everything(), as.character))
+
+# 2. Unir todos
+fichero_r_total <- bind_rows(
+  fichero_r_base2004,
+  fichero_r_base2013_csv,
+  fichero_r_nuevo_csv,
+  fichero_r_rdata
+)
+
+# 3. Eliminar duplicados  
+fichero_r_total <- fichero_r_total  |> 
+  distinct(RB030, RB010, .keep_all = TRUE)
+
+cat("Filas tras eliminar duplicados:", nrow(fichero_r_total), "\n")
+```
+
+## Variable Emancipado y Edad
+
+```{r}
+fichero_r_total <- fichero_r_total |> 
+  mutate(
+    RB010 = as.numeric(RB010),
+    RB030 = as.numeric(RB030),
+    RB080 = as.numeric(RB080),
+    RB220 = as.numeric(RB220),
+    RB230 = as.numeric(RB230),
+    edad  = RB010 - RB080,
+    emancipado = case_when(
+      (is.na(RB220) | RB220 == 0) &
+      (is.na(RB230) | RB230 == 0) ~ 1,
+      TRUE ~ 0
+    )
+  )  |> 
+  filter(edad >= 18 & edad <= 38)
+```
+
+### Detección de transiciones y edad de emancipación
+
+Uso gap = 1 para quedarme con las transiciones entre años consecutivos
+
+```{r}
+transiciones_total <- fichero_r_total |> 
+  arrange(RB030, RB010) |> 
+  group_by(RB030) |> 
+  mutate(
+    emancipado_anterior = lag(emancipado),
+    año_anterior        = lag(RB010),
+    gap                 = RB010 - año_anterior,
+    se_emancipa = case_when(
+      emancipado == 1 & emancipado_anterior == 0 & gap == 1 ~ 1,
+      TRUE ~ 0
+    )
+  )  |> 
+  filter(!is.na(emancipado_anterior), gap == 1)  |> 
+  ungroup()
+```
+
+```{r}
+# Cuántas transiciones hay por año
+transiciones_total  |> 
+  group_by(RB010) |> 
+  summarise(
+    n_total       = n(),
+    n_se_emancipa = sum(se_emancipa == 1),
+    pct_transicion = round(mean(se_emancipa == 1) * 100, 2)
+  )  |> 
+  print(n = 25)
+```
+
+```{r}
+# Edad de emancipación por año
+edad_emancipacion <- transiciones_total  |> 
+  filter(se_emancipa == 1) |> 
+  group_by(RB010) |> 
+  summarise(
+    n            = n(),
+    edad_media   = round(mean(edad, na.rm = TRUE), 1),
+    edad_mediana = median(edad, na.rm = TRUE)
+  )
+
+print(edad_emancipacion, n = 25)
+```
+
+### Gráfico Evolución Edad de Emancipación
+
+```{r}
+edad_emancipacion  |> 
+  filter(RB010 <= 2021, n >= 100) |>  # excluir años con pocas obs
+  ggplot(aes(x = RB010, y = edad_media)) +
+  geom_line(color = "#2d6a4f", linewidth = 1.2) +
+  geom_point(color = "#2d6a4f", size = 3) +
+  geom_smooth(method = "lm", se = TRUE, 
+              color = "#d73027", linetype = "dashed",
+              linewidth = 0.8) +
+  geom_text(aes(label = edad_media), 
+            vjust = -1, size = 3.5) +
+  scale_x_continuous(breaks = seq(2005, 2021, by = 2)) +
+  scale_y_continuous(limits = c(26, 31)) +
+  labs(title = "Edad media de emancipación juvenil en España",
+       subtitle = "Jóvenes de 18-38 años",
+       x = "Año", y = "Edad media de emancipación") +
+  theme_minimal(base_size = 13)
+```
