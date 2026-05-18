@@ -1,11 +1,35 @@
 ---
-title: "TFG"
+title: "Modelo 2004 vs 2025"
 author: "Miriam Gómez Miguel"
-format: html
+date: today
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Índice"
+    number-sections: true
+    warning: false
+    message: false
+    echo: true
 editor: visual
 ---
 
 ## Modelo 2004 vs 2025
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(pROC)
+library(fastshap)
+library(shapviz)
+library(vcd)
+library(scales)
+library(forcats)
+library(mapSpain)
+library(Matrix)
+```
 
 ### Modelo 2025
 
@@ -749,6 +773,13 @@ ggplot(edad_emancipados, aes(x = edad_plot, fill = año, weight = DB090)) +
   theme_minimal()
 ```
 
+Para confirmar lo que vemos visualmente, voy a usar test estadisticos, en concreto, el test Wilcoxon que es no parametrico porque edad no sigue una distribución normal:
+
+```{r}
+wilcox.test(edad ~ emancipado, data = datos_2004)
+wilcox.test(RB081 ~ emancipado, data = datos_2025)
+```
+
 #### Situación Laboral
 
 En este caso, voy a tener que crear una nueva variable porque tienen diferente códigos (PL030 y PL032) y diferentes niveles (8 niveles vs 6 niveles).
@@ -756,7 +787,7 @@ En este caso, voy a tener que crear una nueva variable porque tienen diferente c
 Las voy a organizar asi:
 
 | Categoría nueva | 2004                                                       | 2025                                            |
-|------------------|------------------------------|------------------------|
+|----------------|-------------------------------|-------------------------|
 | Trabajando      | T. completo + T. parcial                                   | Trabajando                                      |
 | Parado          | Parado                                                     | Parado                                          |
 | Estudiante      | Estudiante                                                 | Estudiante                                      |
@@ -823,6 +854,17 @@ ggplot(sit_laboral_plot, aes(x = sit_laboral, y = porcentaje, fill = emancipado)
        fill = "") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+library(vcd)
+tabla_sit_laboral_04 <- table(datos_2004$sit_laboral, datos_2004$emancipado)
+chisq.test(tabla_sit_laboral_04)
+assocstats(tabla_sit_laboral_04)$cramer
+
+tabla_sit_laboral_25 <- table(datos_2025$sit_laboral, datos_2025$emancipado)
+chisq.test(tabla_sit_laboral_25)
+assocstats(tabla_sit_laboral_25)$cramer
 ```
 
 #### Ingresos
@@ -917,6 +959,13 @@ ggplot(ingresos_real |> filter(PY010N_real > 0),
 
 Con estos cambios, podemos ver lo contrario a lo que mostraba el gráfico anterior. Los ingresos de los emancipados en 2025 son ligeramente inferiores a los de 2004 y los no emancipados tienen unos ingresos menores en 2025 que en 2004.
 
+Test estadistico wilcoxon:
+
+```{r}
+wilcox.test(PY010N_real ~ emancipado, data = datos_2004)
+wilcox.test(PY010N_real ~ emancipado, data = datos_2025)
+```
+
 #### Coste de la vivienda
 
 Al igual que antes, voy a deflactar el coste de la vivienda de 2004 para poder comparar:
@@ -954,9 +1003,104 @@ ggplot(coste_plot, aes(x = emancipado, y = coste_vivienda_real, fill = emancipad
 
 Tanto en 2025 como en 2004 el coste mensual de la vivienda en emancipados es prácticamente igual. En cambio, en 2004 el coste de la vivienda mensual era más barato que en 2025.
 
-#### Nivel Educativo
+Test Estadistico Wilcoxon:
 
-Para nivel educativo tenemos el mismo problema que situación laboral, tienen distintos códigos y distintos niveles, por lo que voy a hacer una tabla resumen donde nos da el porcentaje de emancipados dentro de cada nivel educativo en vez de un gráfico:
+```{r}
+wilcox.test(coste_vivienda_real ~ emancipado, 
+            data = datos_2004, na.action = na.omit)
+wilcox.test(coste_vivienda_real ~ emancipado, 
+            data = datos_2025, na.action = na.omit)
+```
+
+#### Esfuerzo Financiero
+
+El esfuerzo financiero es la ratio entre el coste mensual de la vivienda y los ingresos mensuales, cuanto mayor sea, más difícil es acceder a una vivienda independiente.
+
+esfuerzo = coste mensual vivienda / ingresos mensuales
+
+```{r}
+datos_2004 <- datos_2004 %>%
+  mutate(
+    ingresos_mensuales = PY010N_real / 12,
+    esfuerzo_financiero = case_when(
+      ingresos_mensuales > 0 ~ coste_vivienda_real / ingresos_mensuales,
+      TRUE ~ NA_real_
+    )
+  )
+```
+
+```{r}
+datos_2025 <- datos_2025 %>%
+  mutate(
+    ingresos_mensuales = PY010N_real / 12,
+    esfuerzo_financiero = case_when(
+      ingresos_mensuales > 0 ~ coste_vivienda_real / ingresos_mensuales,
+      TRUE ~ NA_real_
+    )
+  )
+```
+
+```{r}
+bind_rows(
+  datos_2004 %>%
+    filter(emancipado == 1, !is.na(esfuerzo_financiero),
+           esfuerzo_financiero < 10) %>% # eliminar outliers extremos
+    summarise(
+      mediana = median(esfuerzo_financiero, na.rm = TRUE),
+      media   = mean(esfuerzo_financiero, na.rm = TRUE),
+      año = "2004"
+    ),
+  datos_2025 %>%
+    filter(emancipado == 1, !is.na(esfuerzo_financiero),
+           esfuerzo_financiero < 10) %>%
+    summarise(
+      mediana = median(esfuerzo_financiero, na.rm = TRUE),
+      media   = mean(esfuerzo_financiero, na.rm = TRUE),
+      año = "2025"
+    )
+)
+```
+
+```{r}
+# Filtro más restrictivo
+esfuerzo <- bind_rows(
+  datos_2004 %>%
+    filter(emancipado == 1, !is.na(esfuerzo_financiero),
+           esfuerzo_financiero > 0,
+           esfuerzo_financiero <= 2) %>%
+    mutate(año = "2004"),
+  datos_2025 %>%
+    filter(emancipado == 1, !is.na(esfuerzo_financiero),
+           esfuerzo_financiero > 0,
+           esfuerzo_financiero <= 2) %>%
+    mutate(año = "2025")
+)
+
+# Cuántos casos quedan
+table(esfuerzo$año)
+
+# Boxplot
+ggplot(esfuerzo, aes(x = año, y = esfuerzo_financiero, fill = año)) +
+  geom_boxplot(width = 0.5, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 0.3, linetype = "dashed",
+             color = "black", linewidth =0.8) +
+  annotate("text", x = 2.4, y = 0.32,
+           label = "Umbral 30%", size = 3.5) +
+  scale_fill_manual(values = c("2004" = "#4393c3", "2025" = "#d73027")) +
+  scale_y_continuous(labels = scales::percent_format(),
+                     limits = c(0, 2)) +
+  labs(title = "Esfuerzo financiero de los jóvenes emancipados",
+       subtitle = "Ratio coste vivienda / ingresos mensuales — 2004 vs 2025",
+       x = "", y = "Esfuerzo financiero", fill = "Año") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+```{r}
+wilcox.test(esfuerzo_financiero ~ año, data = esfuerzo)
+```
+
+#### Nivel Educativo
 
 ```{r}
 # Tabla nivel educativo 2025
@@ -985,6 +1129,128 @@ datos_2004 |>
 ```
 
 En 2004 la educación superior facilitaba la emancipación, pero en 2025 el efecto se ha invertido, posiblemente porque el coste de la vivienda ha subido tanto que ni los universitarios pueden permitirse emanciparse mientras estudian.
+
+```{r}
+tabla_educ_04 <- table(datos_2004$PE040, datos_2004$emancipado)
+chisq.test(tabla_educ_04)
+assocstats(tabla_educ_04)$cramer
+```
+
+La categoría "Menos que primaria" tiene **ceros en ambas columnas**, lo que rompe el cálculo del Chi-cuadrado. La solución es eliminar esa categoría antes de hacer el test:
+
+```{r}
+datos_2025_educ <- datos_2025 %>%
+  filter(PE041 != "Menos que primaria") %>%
+  mutate(PE041 = droplevels(PE041))
+
+tabla_educ_25 <- table(datos_2025_educ$PE041, 
+                       datos_2025_educ$emancipado)
+chisq.test(tabla_educ_25)
+assocstats(tabla_educ_25)$cramer
+```
+
+#### Estado civil
+
+```{r}
+resumen_ecivil <- bind_rows(
+  datos_2004 %>%
+    group_by(PB190, emancipado) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    group_by(PB190) %>%
+    mutate(pct = round(n_pond / sum(n_pond) * 100, 1),
+           año = "2004"),
+  datos_2025 %>%
+    group_by(PB190, emancipado) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    group_by(PB190) %>%
+    mutate(pct = round(n_pond / sum(n_pond) * 100, 1),
+           año = "2025")
+) %>%
+  filter(emancipado == 1)
+```
+
+```{r}
+ggplot(resumen_ecivil, aes(x = PB190, y = pct, fill = año)) +
+  geom_col(position = "dodge", width = 0.6) +
+  geom_text(aes(label = paste0(pct, "%")),
+            position = position_dodge(width = 0.6),
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = c("2004" = "#4393c3", "2025" = "#d73027")) +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(title = "Tasa de emancipación según estado civil",
+       subtitle = "Comparativa 2004 vs 2025 (ponderado)",
+       x = "", y = "% emancipados", fill = "Año") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+tabla_ecivil_04 <- table(datos_2004$PB190, datos_2004$emancipado)
+chisq.test(tabla_ecivil_04)
+assocstats(tabla_ecivil_04)$cramer
+
+tabla_ecivil_25 <- table(datos_2025$PB190, datos_2025$emancipado)
+chisq.test(tabla_ecivil_25)
+assocstats(tabla_ecivil_25)$cramer
+```
+
+#### Régimen de tenencia
+
+Como tienen distintas categorias en ambos años, he agrupado las de propiedad con y sin hipoteca de 2025 en una sola:
+
+```{r}
+datos_2025 <- datos_2025 %>%
+  mutate(HH021_agrup = case_when(
+    HH021 %in% c("Propiedad sin hipoteca", 
+                 "Propiedad con hipoteca") ~ "Propiedad",
+    TRUE ~ as.character(HH021)
+  ) %>% factor(levels = c("Propiedad", "Alquiler mercado", 
+                           "Alquiler reducido", "Cesión gratuita")))
+```
+
+```{r}
+resumen_tenencia <- bind_rows(
+  datos_2004 %>%
+    filter(emancipado == 1) %>%
+    group_by(HH020) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    mutate(pct = round(n_pond / sum(n_pond) * 100, 1),
+           año = "2004") %>%
+    rename(tenencia = HH020),
+  datos_2025 %>%
+    filter(emancipado == 1) %>%
+    group_by(HH021_agrup) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    mutate(pct = round(n_pond / sum(n_pond) * 100, 1),
+           año = "2025") %>%
+    rename(tenencia = HH021_agrup)
+)
+```
+
+```{r}
+ggplot(resumen_tenencia, aes(x = tenencia, y = pct, fill = año)) +
+  geom_col(position = "dodge", width = 0.6) +
+  geom_text(aes(label = paste0(pct, "%")),
+            position = position_dodge(width = 0.6),
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = c("2004" = "#4393c3", "2025" = "#d73027")) +
+  scale_y_continuous(limits = c(0, 80)) +
+  labs(title = "Régimen de tenencia de los jóvenes emancipados",
+       subtitle = "Comparativa 2004 vs 2025 (ponderado)",
+       x = "", y = "% emancipados", fill = "Año") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+tabla_tenencia_04 <- table(datos_2004$HH020, datos_2004$emancipado)
+chisq.test(tabla_tenencia_04)
+assocstats(tabla_tenencia_04)$cramer
+
+tabla_tenencia_25 <- table(datos_2025$HH021, datos_2025$emancipado)
+chisq.test(tabla_tenencia_25)
+assocstats(tabla_tenencia_25)$cramer
+```
 
 #### Zona Urbana
 
@@ -1021,6 +1287,16 @@ ggplot(zona_emancipacion, aes(x = DB100, y = porcentaje, fill = año)) +
 
 Con este gráfico podemos observar que vivir en una ciudad grande en 2025 hace que sea mucho más difícil emanciparse que en 2004, mientras que en los pueblos el efecto es menor porque los precios no han subido tanto.
 
+```{r}
+tabla_zona_04 <- table(datos_2004$DB100, datos_2004$emancipado)
+chisq.test(tabla_zona_04)
+assocstats(tabla_zona_04)$cramer
+
+tabla_zona_25 <- table(datos_2025$DB100, datos_2025$emancipado)
+chisq.test(tabla_zona_25)
+assocstats(tabla_zona_25)$cramer
+```
+
 #### Distribución Geográfica por Comunidad Autónoma
 
 ```{r}
@@ -1051,12 +1327,13 @@ tasa_ccaa_2025
 
 ```{r}
 library(mapSpain)
+mapa_ccaa <- esp_get_ccaa()
 # Unir con los datos
 tasa_ccaa_2025 <- tasa_ccaa_2025 |> 
   left_join(correspondencia, by = "DB040")
 
 # Unir con el mapa
-mapa_2025 <- mapa_ccaa |> 
+mapa_2025 <- mapa_ccaa %>%
   left_join(tasa_ccaa_2025, by = "iso2.ccaa.code")
 
 # Hacer el mapa
@@ -1100,6 +1377,127 @@ ggplot(mapa_2004) +
   theme_void()
 ```
 
+#### Forma de Emancipación
+
+```{r}
+library(tidyverse)
+library(scales)
+```
+
+```{r}
+# ---- 1. CONSTRUIR VARIABLE forma_emancipacion ----
+# RB240 contiene el identificador del cónyuge/pareja
+# Si RB240 > 0 (valor válido), el joven vive con pareja en el hogar
+# Si RB240 es NA o 0, no tiene pareja en el hogar
+
+construir_forma <- function(df) {
+  df |> 
+    mutate(
+      forma_emancipacion = case_when(
+        emancipado == 0                          ~ "No emancipado",
+        emancipado == 1 & !is.na(RB240) & RB240 > 0 ~ "Emancipado en pareja",
+        emancipado == 1                          ~ "Emancipado solo/a",
+        TRUE ~ NA_character_
+      ),
+      forma_emancipacion = factor(forma_emancipacion,
+        levels = c("No emancipado", "Emancipado solo/a", "Emancipado en pareja"))
+    )
+}
+
+datos_2004 <- construir_forma(datos_2004)
+datos_2025 <- construir_forma(datos_2025)
+```
+
+```{r}
+# ---- 2. TASAS PONDERADAS POR AÑO ----
+resumen_forma <- bind_rows(
+  datos_2004 %>%
+    group_by(forma_emancipacion) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    mutate(pct = n_pond / sum(n_pond) * 100, año = "2004"),
+  datos_2025 %>%
+    group_by(forma_emancipacion) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    mutate(pct = n_pond / sum(n_pond) * 100, año = "2025")
+)
+
+print(resumen_forma)
+```
+
+```{r}
+# ---- 3. GRÁFICO COMPARATIVO 2004 vs 2025 ----
+ggplot(resumen_forma, aes(x = año, y = pct, fill = forma_emancipacion)) +
+  geom_col(position = "fill", width = 0.6) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4, color = "white", fontface = "bold") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(values = c(
+    "No emancipado"          = "#d73027",
+    "Emancipado solo/a"      = "#4393c3",
+    "Emancipado en pareja"   = "#2d6a4f"
+  )) +
+  labs(
+    title = "Forma de emancipación juvenil en España (18-38 años)",
+    subtitle = "Comparativa 2004 vs 2025",
+    x = "Año", y = "Proporción (%)",
+    fill = "Situación residencial"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+# ---- 4. DESAGREGACIÓN POR SEXO ----
+resumen_sexo <- bind_rows(
+  datos_2004 %>%
+    filter(emancipado == 1) %>%
+    mutate(sexo = as.character(RB090)) %>%
+    group_by(sexo, forma_emancipacion) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    group_by(sexo) %>%
+    mutate(pct = n_pond / sum(n_pond) * 100, año = "2004"),
+  datos_2025 %>%
+    filter(emancipado == 1) %>%
+    mutate(sexo = as.character(RB090)) %>%
+    group_by(sexo, forma_emancipacion) %>%
+    summarise(n_pond = sum(DB090, na.rm = TRUE), .groups = "drop") %>%
+    group_by(sexo) %>%
+    mutate(pct = n_pond / sum(n_pond) * 100, año = "2025")
+)
+resumen_sexo
+```
+
+```{r}
+ggplot(resumen_sexo, aes(x = año, y = pct, fill = forma_emancipacion)) +
+  geom_col(position = "fill", width = 0.6) +
+  geom_text(aes(label = paste0(round(pct, 1), "%")),
+            position = position_fill(vjust = 0.5),
+            size = 3.5, color = "white", fontface = "bold") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_manual(values = c(
+    "Emancipado solo/a"    = "#4393c3",
+    "Emancipado en pareja" = "#2d6a4f"
+  )) +
+  facet_wrap(~sexo) +
+  labs(
+    title = "Forma de emancipación por sexo",
+    subtitle = "Comparativa 2004 vs 2025",
+    x = "Año", y = "Proporción (%)",
+    fill = "Forma de emancipación"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+tabla_sexo_04 <- table(datos_2004$RB090, datos_2004$emancipado)
+chisq.test(tabla_sexo_04)
+assocstats(tabla_sexo_04)$cramer
+
+tabla_sexo_25 <- table(datos_2025$RB090, datos_2025$emancipado)
+chisq.test(tabla_sexo_25)
+assocstats(tabla_sexo_25)$cramer
+```
+
 ### Modelos Predictivos
 
 Pasamos a la parte de predecir modelos. Voy a seguir estos pasos:
@@ -1131,11 +1529,6 @@ datos_2004 <- datos_2004 |>
 ```
 
 ```{r}
-save(datos_2004, file = "datos_2004_finales.RData")
-save(datos_2025, file = "datos_2025_finales.RData")
-```
-
-```{r}
 modelo_2025 <- datos_2025 |> 
   select(emancipado, sit_laboral,PL141, PE041, PB190, HH030, HH021, HS120, RB090, RB081, PY010N_real, DB040, DB100, coste_vivienda_real) |> 
   drop_na()  
@@ -1145,11 +1538,6 @@ modelo_2025 <- datos_2025 |>
 modelo_2004 <- datos_2004 |> 
   select(emancipado, sit_laboral,PL140, PE040, PB190, HH030, HH020, HS120, RB090, edad, PY010N_real, DB040, DB100, coste_vivienda_real) |> 
   drop_na()  
-```
-
-```{r}
-save(modelo_2004, file = "modelo_2004.RData")
-save(modelo_2025, file = "modelo_2025.RData")
 ```
 
 #### 2. Dividir la muestra
@@ -1226,6 +1614,10 @@ pred_rl_2025 <- predict(rl_2025, test_2025)
 confusionMatrix(pred_rl_2025, test_2025$emancipado, positive = "Si")
 ```
 
+```{r}
+prob_rl_2025  <- predict(rl_2025,  test_2025, type = "prob")[, "Si"]
+```
+
 **2004**
 
 ```{r}
@@ -1259,15 +1651,15 @@ pred_rl_2004 <- predict(rl_2004, test_2004)
 confusionMatrix(pred_rl_2004, test_2004$emancipado, positive = "Si")
 ```
 
-La emancipación en 2004 era más predecible que en 2025, lo que sugiere que los factores determinantes eran más claros y consistentes. En 2025, el fenómeno es más complejo y heterogéneo, posiblemente debido a la mayor diversidad de situaciones vitales entre los jóvenes actuales."
+La emancipación en 2004 era más predecible que en 2025, lo que sugiere que los factores determinantes eran más claros y consistentes. En 2025, el fenómeno es más complejo y heterogéneo, posiblemente debido a la mayor diversidad de situaciones vitales entre los jóvenes actuales.
+
+```{r}
+prob_rl_2004  <- predict(rl_2004,  test_2004, type = "prob")[, "Si"]
+```
 
 ##### Random Forest
 
 **2025**
-
-```{r}
-load("modelos.RData")
-```
 
 ```{r}
 library(randomForest)
@@ -1291,6 +1683,10 @@ pred_rf_2025 <- predict(rf_2025, test_2025)
 confusionMatrix(pred_rf_2025, test_2025$emancipado, positive = "Si")
 ```
 
+```{r}
+prob_rf_2025  <- predict(rf_2025,  test_2025, type = "prob")[, "Si"]
+```
+
 **2004**
 
 ```{r}
@@ -1310,6 +1706,10 @@ rf_2004
 ```{r}
 pred_rf_2004 <- predict(rf_2004, test_2004)
 confusionMatrix(pred_rf_2004, test_2004$emancipado, positive = "Si")
+```
+
+```{r}
+prob_rf_2004  <- predict(rf_2004,  test_2004, type = "prob")[, "Si"]
 ```
 
 ##### XGBoost
@@ -1368,14 +1768,6 @@ pred_xgb_2025_clase <- factor(pred_xgb_2025_clase, levels = c("No", "Si"))
 confusionMatrix(pred_xgb_2025_clase, test_2025$emancipado, positive = "Si")
 ```
 
-```{r}
-library(pROC)
-
-# AUC-ROC XGBoost 2025
-roc_xgb_2025 <- roc(test_label_2025, pred_xgb_2025)
-auc(roc_xgb_2025)
-```
-
 **2004**
 
 ```{r}
@@ -1408,11 +1800,6 @@ pred_xgb_2004_clase <- factor(pred_xgb_2004_clase, levels = c("No", "Si"))
 
 # Matriz de confusión
 confusionMatrix(pred_xgb_2004_clase, test_2004$emancipado, positive = "Si")
-```
-
-```{r}
-roc_xgb_2004 <- roc(test_label_2004, pred_xgb_2004)
-auc(roc_xgb_2004)
 ```
 
 ##### Elección modelo ganador de cada año:
@@ -1453,6 +1840,68 @@ cat("\nMejor modelo 2025:", comparativa$Modelo[which.max(comparativa$score_2025)
 ```
 
 Tras comparar los tres modelos mediante una puntuación combinada de AUC-ROC, accuracy y Kappa, el Random Forest resulta ser el modelo con mejor rendimiento global tanto para 2004 (puntuación: 0.9104) como para 2025 (puntuación: 0.8564). Por tanto, el Random Forest se selecciona como modelo final para la interpretación de resultados mediante importancia de variables y valores SHAP.
+
+##### Curvas Roc
+
+**2025**
+
+```{r}
+roc_rl_2025  <- roc(test_2025$emancipado, prob_rl_2025,  
+                    levels = c("No", "Si"), direction = "<")
+roc_rf_2025  <- roc(test_2025$emancipado, prob_rf_2025,  
+                    levels = c("No", "Si"), direction = "<")
+roc_xgb_2025 <- roc(test_label_2025, pred_xgb_2025)
+```
+
+```{r}
+plot(roc_rl_2025, col = "#4393c3", lwd = 2.5,
+     main = "Curva ROC — Comparativa de modelos 2025",
+     xlab = "1 - Especificidad", ylab = "Sensibilidad",
+     xlim = c(1, 0), ylim = c(0, 1),
+     asp = NA)
+lines(roc_rf_2025,  col = "#2d6a4f", lwd = 2.5)
+lines(roc_xgb_2025, col = "#d73027", lwd = 2.5)
+
+legend("bottomright",
+       legend = c(
+         paste0("Reg. Logística (AUC = ", round(auc(roc_rl_2025), 4), ")"),
+         paste0("Random Forest  (AUC = ", round(auc(roc_rf_2025), 4), ")"),
+         paste0("XGBoost        (AUC = ", round(auc(roc_xgb_2025), 4), ")")
+       ),
+       col = c("#4393c3", "#2d6a4f", "#d73027", "grey60", "black"),
+       lty = c(1, 1, 1, 2, 3),
+       lwd = 2, cex = 0.9,
+       box.lty = 0)
+```
+
+**2004**
+
+```{r}
+roc_rl_2004  <- roc(test_2004$emancipado, prob_rl_2004,
+                    levels = c("No", "Si"), direction = "<")
+roc_rf_2004  <- roc(test_2004$emancipado, prob_rf_2004,
+                    levels = c("No", "Si"), direction = "<")
+roc_xgb_2004 <- roc(test_label_2004, pred_xgb_2004)
+```
+
+```{r}
+plot(roc_rl_2004, col = "#4393c3", lwd = 2.5,
+     main = "Curva ROC — Comparativa de modelos 2004",
+     xlab = "1 - Especificidad", ylab = "Sensibilidad",
+     xlim = c(1, 0), ylim = c(0, 1), asp = NA)
+lines(roc_rf_2004,  col = "#2d6a4f", lwd = 2.5)
+lines(roc_xgb_2004, col = "#d73027", lwd = 2.5)
+
+legend("bottomright",
+       legend = c(
+         paste0("Reg. Logística (AUC = ", round(auc(roc_rl_2004), 4), ")"),
+         paste0("Random Forest  (AUC = ", round(auc(roc_rf_2004), 4), ")"),
+         paste0("XGBoost        (AUC = ", round(auc(roc_xgb_2004), 4), ")")
+       ),
+       col = c("#4393c3", "#2d6a4f", "#d73027", "grey60", "black"),
+       lty = c(1, 1, 1, 2, 3),
+       lwd = 2, cex = 0.9, box.lty = 0)
+```
 
 #### 4. Interpretación de los modelos
 
@@ -1554,6 +2003,10 @@ save(rl_2004, rl_2025,
 save(datos_2004, datos_2025, file = "datos_limpios.RData")
 ```
 
+```{r}
+
+```
+
 #### Predicción
 
 ```{r}
@@ -1565,16 +2018,16 @@ Predecir probabilidad de que un joven este emancipado según un perfil concreto:
 
 ```{r}
 perfil_futura <- data.frame(
-  RB081 = 27,                          
-  PB190 = factor("Casado", levels = levels(datos_2025$PB190)),
+  RB081 = 32,                          
+  PB190 = factor("Soltero", levels = levels(datos_2025$PB190)),
   sit_laboral = factor("Trabajando", levels = levels(datos_2025$sit_laboral)),
   PL141 = factor("Fijo Escrito", levels = levels(datos_2025$PL141)),
   PE041 = factor("Superior", levels = levels(datos_2025$PE041)),
   HH030 = 3,                           
   HH021 = factor("Propiedad sin hipoteca", levels = levels(datos_2025$HH021)),
-  HS120 = factor("Cierta facilidad", levels = levels(datos_2025$HS120)),
+  HS120 = factor("Cierta dificultad", levels = levels(datos_2025$HS120)),
   RB090 = factor("Mujer", levels = levels(datos_2025$RB090)),
-  PY010N_real = 42000,                     
+  PY010N_real = 20000,                     
   DB040 = factor("ES30", levels = levels(datos_2025$DB040)),
   DB100 = factor("Zona muy poblada", levels = levels(datos_2025$DB100)),
   coste_vivienda_real = 800            
@@ -1623,4 +2076,34 @@ perfil_2004 <- data.frame(
 )
 
 predict(rf_2004, perfil_2004, type = "prob")
+```
+
+```{r}
+saveRDS(rf_2004, "RF2004.rds")
+saveRDS(rf_2025, "RF2025.rds")
+```
+
+```{r}
+# Calcular MAE real en test
+# MAE correcto para 2004 (emancipado es 0/1 numérico)
+mae_2004 <- mean(abs(probs_2004 - test_2004$emancipado))
+
+# MAE correcto para 2025 (emancipado es factor "No"/"Si")
+mae_2025 <- mean(abs(probs_2025 - test_2025$emancipado))
+
+cat("MAE 2004:", mae_2004, "\n")
+cat("MAE 2025:", mae_2025, "\n")
+```
+
+```{r}
+shiny::runApp("app.R")
+```
+
+```{r}
+# Desactiva renv temporalmente y despliega
+options(renv.consent = TRUE)
+rsconnect::deployApp(
+  "C:/Users/mirig/OneDrive/Escritorio/Universidad/4º Año/2º Cuatrimestre/TFG/app_shiny",
+  forceUpdate = TRUE
+)
 ```
