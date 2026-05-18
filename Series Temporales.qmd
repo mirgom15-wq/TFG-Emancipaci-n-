@@ -1,7 +1,12 @@
 ---
-title: "TFG"
+title: "Análisis de serie temporal de 2004 a 2025"
 author: "Miriam Gómez Miguel"
-format: html
+date: today
+format: 
+  html:
+    warning: false
+    message: false
+    fig-show: true
 editor: visual
 ---
 
