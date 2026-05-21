@@ -1,0 +1,223 @@
+---
+title: "Análisis de serie temporal de 2004 a 2025"
+author: "Miriam Gómez Miguel"
+date: today
+format: 
+  html:
+    warning: false
+    message: false
+    fig-show: true
+editor: visual
+---
+
+### Librerías
+
+```{r}
+library(tidyverse)
+```
+
+### Cargar Datos
+
+```{r}
+ruta_base <- "C:/Users/mirig/OneDrive/Escritorio/Universidad/4º Año/2º Cuatrimestre/TFG/Datos ECV/Datos Transversales - Serie Temporal/"
+```
+
+#### Años 2004-2015 (CSV antiguo)
+
+```{r}
+resultados_csv_antiguo <- map_dfr(2004:2015, function(año) {
+  ruta_r <- paste0(ruta_base, año, "/esudb", substr(año, 3, 4), "r.csv")
+  ruta_d <- paste0(ruta_base, año, "/esudb", substr(año, 3, 4), "d.csv")
+  
+  datos_r <- read_csv(ruta_r, show_col_types = FALSE)
+  datos_d <- read_csv(ruta_d, show_col_types = FALSE)
+  
+  datos_d <- datos_d |> rename(id_hogar = DB030)
+  datos_r <- datos_r |> mutate(id_hogar = RB030 %/% 100)
+  
+  datos <- datos_r |>
+    left_join(datos_d |> select(id_hogar, DB090), by = "id_hogar") |>
+    mutate(edad = año - RB080) |>
+    filter(edad >= 18 & edad <= 38) |>
+    mutate(emancipado = ifelse(is.na(RB220) & is.na(RB230), 1, 0))
+  
+  tasa <- datos |>
+    group_by(emancipado) |>
+    summarise(total = sum(DB090, na.rm = TRUE), .groups = "drop") |>
+    mutate(porcentaje = round(total / sum(total) * 100, 2)) |>
+    filter(emancipado == 1) |>
+    pull(porcentaje)
+  
+  edad_media <- datos |>
+    filter(emancipado == 1) |>
+    summarise(edad_media = weighted.mean(edad, DB090, na.rm = TRUE)) |>
+    pull(edad_media) |>
+    round(1)
+  
+  data.frame(año = año, tasa_emancipacion = tasa, edad_media_emancipados = edad_media)
+})
+```
+
+#### Años 2016-2021 (CSV nuevo)
+
+```{r}
+# BLOQUE 2: CSV formato nuevo (2016-2021)
+resultados_csv_nuevo <- map_dfr(2016:2021, function(año) {
+  ruta_r <- paste0(ruta_base, año, "/ECV_Tr_", año, ".csv")
+  ruta_d <- paste0(ruta_base, año, "/ECV_Td_", año, ".csv")
+  
+  datos_r <- read_tsv(ruta_r, show_col_types = FALSE)
+  datos_d <- read_tsv(ruta_d, show_col_types = FALSE)
+  
+  datos_d <- datos_d |> rename(id_hogar = DB030)
+  datos_r <- datos_r |> mutate(id_hogar = RB030 %/% 100)
+  
+  datos <- datos_r |>
+    left_join(datos_d |> select(id_hogar, DB090), by = "id_hogar") |>
+    mutate(edad = año - RB080) |>
+    filter(edad >= 18 & edad <= 38) |>
+    mutate(emancipado = ifelse(is.na(RB220) & is.na(RB230), 1, 0))
+  
+  tasa <- datos |>
+    group_by(emancipado) |>
+    summarise(total = sum(DB090, na.rm = TRUE), .groups = "drop") |>
+    mutate(porcentaje = round(total / sum(total) * 100, 2)) |>
+    filter(emancipado == 1) |>
+    pull(porcentaje)
+  
+  edad_media <- datos |>
+    filter(emancipado == 1) |>
+    summarise(edad_media = weighted.mean(edad, DB090, na.rm = TRUE)) |>
+    pull(edad_media) |>
+    round(1)
+  
+  data.frame(año = año, tasa_emancipacion = tasa, edad_media_emancipados = edad_media)
+})
+```
+
+#### Años 2022-2025
+
+```{r}
+# BLOQUE 3a: RData (2022-2024)
+resultados_rdata_1 <- map_dfr(2022:2024, function(año) {
+  ruta_r <- paste0(ruta_base, año, "/ECV_Tr_", año, ".RData")
+  ruta_d <- paste0(ruta_base, año, "/ECV_Td_", año, ".RData")
+  
+  env_r <- new.env()
+  env_d <- new.env()
+  load(ruta_r, envir = env_r)
+  load(ruta_d, envir = env_d)
+  
+  datos_r <- get("Microdatos", envir = env_r)
+  datos_d <- get("Microdatos", envir = env_d)
+  
+  datos_d <- datos_d |> rename(id_hogar = DB030)
+  datos_r <- datos_r |> mutate(id_hogar = RB030 %/% 100)
+  
+  datos <- datos_r |>
+    left_join(datos_d |> select(id_hogar, DB090), by = "id_hogar") |>
+    rename(edad = RB081) |>
+    filter(edad >= 18 & edad <= 38) |>
+    mutate(emancipado = ifelse(is.na(RB220) & is.na(RB230), 1, 0))
+  
+  tasa <- datos |>
+    group_by(emancipado) |>
+    summarise(total = sum(DB090, na.rm = TRUE), .groups = "drop") |>
+    mutate(porcentaje = round(total / sum(total) * 100, 2)) |>
+    filter(emancipado == 1) |>
+    pull(porcentaje)
+  
+  edad_media <- datos |>
+    filter(emancipado == 1) |>
+    summarise(edad_media = weighted.mean(edad, DB090, na.rm = TRUE)) |>
+    pull(edad_media) |>
+    round(1)
+  
+  data.frame(año = año, tasa_emancipacion = tasa, edad_media_emancipados = edad_media)
+})
+```
+
+```{r}
+# BLOQUE 3b: 2025
+resultados_2025 <- {
+  ruta_r <- paste0(ruta_base, "2025/ECV_Tr_2025.RData")
+  ruta_d <- paste0(ruta_base, "2025/ECV_Td_2025.RData")
+  
+  env_r <- new.env()
+  env_d <- new.env()
+  load(ruta_r, envir = env_r)
+  load(ruta_d, envir = env_d)
+  
+  datos_r <- get("df_micro", envir = env_r)
+  datos_d <- get("df_micro", envir = env_d)
+  
+  datos_d <- datos_d |> rename(id_hogar = DB030)
+  datos_r <- datos_r |> mutate(id_hogar = RB030 %/% 100)
+  
+  datos <- datos_r |>
+    left_join(datos_d |> select(id_hogar, DB090), by = "id_hogar") |>
+    rename(edad = RB081) |>
+    filter(edad >= 18 & edad <= 38) |>
+    mutate(emancipado = ifelse(is.na(RB220) & is.na(RB230), 1, 0))
+  
+  tasa <- datos |>
+    group_by(emancipado) |>
+    summarise(total = sum(DB090, na.rm = TRUE), .groups = "drop") |>
+    mutate(porcentaje = round(total / sum(total) * 100, 2)) |>
+    filter(emancipado == 1) |>
+    pull(porcentaje)
+  
+  edad_media <- datos |>
+    filter(emancipado == 1) |>
+    summarise(edad_media = weighted.mean(edad, DB090, na.rm = TRUE)) |>
+    pull(edad_media) |>
+    round(1)
+  
+  data.frame(año = 2025, tasa_emancipacion = tasa, edad_media_emancipados = edad_media)
+}
+```
+
+```{r}
+serie_temporal <- bind_rows(
+  resultados_csv_antiguo,
+  resultados_csv_nuevo,
+  resultados_rdata_1,
+  resultados_2025
+)
+
+serie_temporal
+```
+
+#### Gráfico Evolución
+
+```{r}
+ggplot(serie_temporal, aes(x = año, y = tasa_emancipacion)) +
+  geom_line(color = "#3498DB", linewidth = 1) +
+  geom_point(color = "#3498DB", size = 2) +
+  geom_vline(xintercept = 2008, linetype = "dashed", color = "red", alpha = 0.7) +
+  geom_vline(xintercept = 2020, linetype = "dashed", color = "orange", alpha = 0.7) +
+  annotate("text", x = 2008.5, y = 44, label = "Crisis 2008", color = "red", size = 3) +
+  annotate("text", x = 2020.5, y = 44, label = "COVID", color = "orange", size = 3) +
+  labs(title = "Evolución de la tasa de emancipación juvenil en España (2004-2025)",
+       subtitle = "Jóvenes de 18 a 38 años",
+       x = "Año", y = "% Emancipados") +
+  scale_x_continuous(breaks = seq(2004, 2025, by = 2)) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(serie_temporal, aes(x = año, y = tasa_emancipacion)) +
+  geom_line(color = "#3498DB", linewidth = 1) +
+  geom_point(color = "#3498DB", size = 2) +
+  geom_text(aes(label = edad_media_emancipados), 
+            vjust = -1, size = 2.5, color = "gray30") +
+  geom_vline(xintercept = 2008, linetype = "dashed", color = "red", alpha = 0.7) +
+  geom_vline(xintercept = 2020, linetype = "dashed", color = "orange", alpha = 0.7) +
+  annotate("text", x = 2008.5, y = 44, label = "Crisis 2008", color = "red", size = 3) +
+  annotate("text", x = 2020.5, y = 44, label = "COVID", color = "orange", size = 3) +
+  labs(title = "Evolución de la tasa de emancipación juvenil en España (2004-2025)",
+       subtitle = "Jóvenes de 18 a 38 años. Etiqueta de Datos: promedio de edad de emancipados",
+       x = "Año", y = "% Emancipados") +
+  scale_x_continuous(breaks = seq(2004, 2025, by = 2)) +
+  theme_minimal()
+```
