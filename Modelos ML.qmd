@@ -787,7 +787,7 @@ En este caso, voy a tener que crear una nueva variable porque tienen diferente c
 Las voy a organizar asi:
 
 | Categoría nueva | 2004                                                       | 2025                                            |
-|------------------|------------------------------|------------------------|
+|-------------------|------------------------------|------------------------|
 | Trabajando      | T. completo + T. parcial                                   | Trabajando                                      |
 | Parado          | Parado                                                     | Parado                                          |
 | Estudiante      | Estudiante                                                 | Estudiante                                      |
@@ -871,7 +871,7 @@ assocstats(tabla_sit_laboral_25)$cramer
 
 En esta variable, hay muchos valores que serán 0 por las personas como estudiantes o gente parada. Voy a hacer dos gráficos: uno con todas las personas y otro con solo las personas que tienen ingresos. Cabe descatacar que estos gráficos estan hechos con la variable PY010N que son ingresos netos.
 
-**Incluyendo todas las situaciones laborales:**
+**Incluyendo todas las personas sin ingresos:**
 
 ```{r}
 ingresos_plot <- bind_rows(
