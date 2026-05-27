@@ -766,7 +766,7 @@ edad_emancipados <- bind_rows(
 ggplot(edad_emancipados, aes(x = edad_plot, fill = año, weight = DB090)) +
   geom_density(alpha = 0.5) +
   scale_fill_manual(values = c("#3498DB", "#E67E22")) +
-  labs(title = "Distribución de edad en el momento de emancipación",
+  labs(title = "Distribución de edad de la población joven emancipada",
        subtitle = "Comparativa 2004 vs 2025",
        x = "Edad", y = "Densidad",
        fill = "Año") +
@@ -787,7 +787,7 @@ En este caso, voy a tener que crear una nueva variable porque tienen diferente c
 Las voy a organizar asi:
 
 | Categoría nueva | 2004                                                       | 2025                                            |
-|-------------------|------------------------------|------------------------|
+|-------------------|-----------------------------|------------------------|
 | Trabajando      | T. completo + T. parcial                                   | Trabajando                                      |
 | Parado          | Parado                                                     | Parado                                          |
 | Estudiante      | Estudiante                                                 | Estudiante                                      |
@@ -1005,6 +1005,33 @@ ggplot(coste_plot, aes(x = emancipado, y = coste_vivienda_real, fill = emancipad
 
 Tanto en 2025 como en 2004 el coste mensual de la vivienda en emancipados es prácticamente igual. En cambio, en 2004 el coste de la vivienda mensual era más barato que en 2025.
 
+```{r}
+emancipados_2004 <- datos_2004 |> filter(emancipado == 1)
+emancipados_2025 <- datos_2025 |> filter(emancipado == 1)
+
+# Añadir columna de año
+emancipados_2004$año <- "2004"
+emancipados_2025$año <- "2025"
+
+# Unir
+emancipados_total <- bind_rows(emancipados_2004, emancipados_2025)
+
+# Gráfico
+ggplot(emancipados_total, aes(x = coste_vivienda_real, fill = año, color = año)) +
+  geom_density(alpha = 0.4) +
+  scale_fill_manual(values = c("2004" = "#3498DB", "2025" = "#E67E22")) +
+  scale_color_manual(values = c("2004" = "#3498DB", "2025" = "#E67E22")) +
+  labs(
+    title = "Distribución del coste de vivienda en jóvenes emancipados",
+    subtitle = "Comparativa 2004 vs 2025",
+    x = "Coste mensual de vivienda (€)",
+    y = "Densidad",
+    fill = "Año",
+    color = "Año"
+  ) +
+  theme_minimal()
+```
+
 Test Estadistico Wilcoxon:
 
 ```{r}
@@ -1096,6 +1123,29 @@ ggplot(esfuerzo, aes(x = año, y = esfuerzo_financiero, fill = año)) +
        x = "", y = "Esfuerzo financiero", fill = "Año") +
   theme_minimal(base_size = 13) +
   theme(legend.position = "none")
+```
+
+```{r}
+# Función de densidad del esfuerzo financiero
+ggplot(esfuerzo, aes(x = esfuerzo_financiero, fill = año, color = año)) +
+  geom_density(alpha = 0.4) +
+  geom_vline(xintercept = 0.3, linetype = "dashed",
+             color = "black", linewidth = 0.8) +
+  annotate("text", x = 0.35, y = max(density(esfuerzo$esfuerzo_financiero)$y),
+           label = "Umbral 30%", size = 3.5) +
+  scale_fill_manual(values = c("2004" = "#3498DB", "2025" = "#E67E22")) +
+  scale_color_manual(values = c("2004" = "#3498DB", "2025" = "#E67E22")) +
+  scale_x_continuous(labels = scales::percent_format(),
+                     limits = c(0, 2)) +
+  labs(
+    title = "Distribución del esfuerzo financiero de los jóvenes emancipados",
+    subtitle = "Comparación 2004 vs 2025",
+    x = "Esfuerzo financiero",
+    y = "Densidad",
+    fill = "Año",
+    color = "Año"
+  ) +
+  theme_minimal(base_size = 13)
 ```
 
 ```{r}
@@ -1237,7 +1287,7 @@ ggplot(resumen_tenencia, aes(x = tenencia, y = pct, fill = año)) +
             vjust = -0.5, size = 3.5, fontface = "bold") +
   scale_fill_manual(values = c("2004" = "#4393c3", "2025" = "#d73027")) +
   scale_y_continuous(limits = c(0, 80)) +
-  labs(title = "Régimen de tenencia de los jóvenes emancipados",
+  labs(title = "Régimen de tenencia de la vivienda de los jóvenes emancipados",
        subtitle = "Comparativa 2004 vs 2025 (ponderado)",
        x = "", y = "% emancipados", fill = "Año") +
   theme_minimal(base_size = 13) +
@@ -1944,14 +1994,32 @@ plot(importance_rf_2004, top = 15, main = "Importancia de variables - Random For
 **2025**
 
 ```{r}
+nombres_variables_2025 <- c(
+  "sit_laboral"         = "Situación laboral",
+  "PL141"               = "Tipo de contrato",
+  "PE041"               = "Nivel educativo",
+  "PB190"               = "Estado civil",
+  "HH030"               = "Nº habitaciones",
+  "HH021"               = "Régimen de tenencia",
+  "HS120"               = "Dificultad fin de mes",
+  "RB090"               = "Sexo",
+  "RB081"               = "Año de nacimiento",
+  "PY010N_real"         = "Ingresos netos (real)",
+  "DB040"               = "Comunidad autónoma",
+  "DB100"               = "Zona urbana",
+  "coste_vivienda_real" = "Coste vivienda (real)"
+)
+```
+
+```{r}
 set.seed(123)
-muestra <- train_2025 |> 
+muestra_2025 <- train_2025 |> 
   select(-emancipado) |> 
   sample_n(500)
 
 explain_2025 <- fastshap::explain(
   rf_2025,
-  X = muestra,
+  X = muestra_2025,
   nsim = 20,
   pred_wrapper = function(model, newdata) {
     predict(model, newdata, type = "prob")[, "Si"]
@@ -1960,9 +2028,18 @@ explain_2025 <- fastshap::explain(
 ```
 
 ```{r}
-library(shapviz)
-shp <- shapviz(explain_2025, X = muestra)
-sv_importance(shp, kind = "beeswarm")
+muestra_2025_plot <- muestra_2025
+explain_2025_plot <- explain_2025
+
+colnames(muestra_2025_plot) <- nombres_variables_2025[colnames(muestra_2025_plot)]
+colnames(explain_2025_plot) <- nombres_variables_2025[colnames(explain_2025_plot)]
+
+
+shp_2025 <- shapviz(explain_2025_plot, X = muestra_2025_plot)
+
+sv_importance(shp_2025, kind = "beeswarm") +
+  labs(title = "Valores SHAP - Random Forest 2025") +
+  theme_minimal(base_size = 13)
 ```
 
 En 2025, la edad es el factor más determinante de la emancipación juvenil en España, superando incluso al estado civil, los ingresos y el coste de la vivienda. Esto sugiere que la emancipación ya no depende tanto de eventos vitales como el matrimonio o de factores económicos puntuales, sino de un proceso de acumulación gradual de recursos a lo largo del tiempo que solo se consigue con la edad.
@@ -1970,6 +2047,24 @@ En 2025, la edad es el factor más determinante de la emancipación juvenil en E
 El precio de la vivienda no aparece como factor diferenciador en 2025 precisamente porque su impacto es tan generalizado que afecta por igual a todos los jóvenes, convirtiéndose en una barrera estructural universal en lugar de un factor individual discriminante
 
 **2004**
+
+```{r}
+nombres_variables_2004 <- c(
+  "PB190"     = "Estado civil",
+  "edad"      = "Edad",
+  "coste_vivienda_real" = "Coste vivienda (real)",
+  "HH030"     = "Nº habitaciones",
+  "HH020"     = "Régimen de tenencia",
+  "PY010N_real" = "Ingresos netos (real)",
+  "sit_laboral" = "Situación laboral",
+  "PL140"     = "Tipo de contrato",
+  "DB040"     = "Comunidad autónoma",
+  "RB090"     = "Sexo",
+  "PE040"     = "Nivel educativo",
+  "HS120"     = "Dificultad fin de mes",
+  "DB100"     = "Zona urbana"
+)
+```
 
 ```{r}
 set.seed(123)
@@ -1985,6 +2080,21 @@ explain_2004 <- fastshap::explain(
     predict(model, newdata, type = "prob")[, "Si"]
   }
 )
+
+```
+
+```{r}
+muestra_2004_plot <- muestra_2004
+explain_2004_plot <- explain_2004
+
+colnames(muestra_2004_plot) <- nombres_variables_2004[colnames(muestra_2004_plot)]
+colnames(explain_2004_plot) <- nombres_variables_2004[colnames(explain_2004_plot)]
+
+shp_2004 <- shapviz(explain_2004_plot, X = muestra_2004_plot)
+
+sv_importance(shp_2004, kind = "beeswarm") +
+  labs(title = "Valores SHAP - Random Forest 2004") +
+  theme_minimal(base_size = 13)
 ```
 
 ```{r}
@@ -2032,6 +2142,26 @@ perfil_futura <- data.frame(
 )
 
 predict(rf_2025, perfil_futura, type = "prob")
+```
+
+```{r}
+perfil_futura04 <- data.frame(
+  edad = 22,                          
+  PB190 = factor("Soltero", levels = levels(datos_2004$PB190)),
+  sit_laboral = factor("Estudiante", levels = levels(datos_2004$sit_laboral)),
+  PL140 = factor("No aplica", levels = levels(datos_2004$PL140)),
+  PE040 = factor("Educación Superior", levels = levels(datos_2004$PE040)),
+  HH030 = 3,                           
+  HH020 = factor("Propiedad", levels = levels(datos_2004$HH020)),
+  HS120 = factor("Cierta dificultad", levels = levels(datos_2004$HS120)),
+  RB090 = factor("Mujer", levels = levels(datos_2004$RB090)),
+  PY010N_real = 0,                     
+  DB040 = factor("ES30", levels = levels(datos_2004$DB040)),
+  DB100 = factor("Zona muy poblada", levels = levels(datos_2004$DB100)),
+  coste_vivienda_real = 800            
+)
+
+predict(rf_2004, perfil_futura04, type = "prob")
 ```
 
 ```{r}
